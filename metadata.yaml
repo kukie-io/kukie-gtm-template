@@ -1,5 +1,5 @@
 homepage: "https://kukie.io"
 documentation: "https://kukie.io/docs/integrations/google-consent-mode-basic-vs-advanced"
 versions:
-  - sha: ac1519eef1b9326a97bfc9a7e031cc69bb83c3c9
+  - sha: 4c05c16896b9f578f6b9f9d6f3a61e576a5d6ac0
     changeNotes: "Initial release. Kukie CMP consent mode template with support for all 7 GCM v2 parameters, per-region defaults, ads data redaction, and URL passthrough."
