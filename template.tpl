@@ -51,7 +51,7 @@ ___TEMPLATE_PARAMETERS___
     "type": "PARAM_TABLE",
     "name": "defaultSettings",
     "displayName": "Default Consent Settings",
-    "help": "The consent state Google tags start with, before the visitor makes a choice. Add one row with the region left blank and all six types as denied: ad_storage, ad_user_data, ad_personalization, analytics_storage, functionality_storage, personalization_storage. If you add no rows, the tag denies these six and grants security_storage. The Kukie banner then sends the visitor's choice as an update.",
+    "help": "The consent state Google tags start with, before the visitor makes a choice. Copy the rows from your Kukie dashboard: your site's Overview, Installation card, Google Tag Manager tab. They follow your region rules: every type denied where your banner asks first, and what Accept all grants where your rules allow data by default. Keep the row with the region left blank, which denies the six types everywhere else. If you add no rows, the tag denies ad_storage, ad_user_data, ad_personalization, analytics_storage, functionality_storage and personalization_storage and grants security_storage. A visitor who already chose on this device, or whose browser sends Global Privacy Control or Do Not Track, starts with every granted type denied but security_storage. The Kukie banner then sends the visitor's choice as an update.",
     "paramTableColumns": [
       {
         "param": {
@@ -110,6 +110,8 @@ const gtagSet = require('gtagSet');
 const injectScript = require('injectScript');
 const setInWindow = require('setInWindow');
 const makeString = require('makeString');
+const getCookieValues = require('getCookieValues');
+const copyFromWindow = require('copyFromWindow');
 
 const DEVELOPER_ID = 'dOTA0OT';
 
@@ -130,7 +132,31 @@ const splitInput = function(input) {
 };
 
 /**
+ * Whether this visitor must not start with a granted default: a choice
+ * already stored on this device (the banner's _cc_consent cookie, or the
+ * kk_consent cookie of an HTTP consent cookie setup), or a Global Privacy
+ * Control or Do Not Track signal. The banner restores the stored choice, or
+ * applies the signal, once it loads; until then a granted row would let
+ * Google tags run granted for a visitor who may have refused. This mirrors
+ * the banner script's own rule for its region defaults. The template cannot
+ * read whether the site honours the signals, so it treats them as binding.
+ */
+const hasCookie = function(name) {
+  const values = getCookieValues(name);
+  for (let i = 0; i < values.length; i++) {
+    if (values[i]) return true;
+  }
+  return false;
+};
+const holdGrants = hasCookie('_cc_consent') ||
+  hasCookie('kk_consent') ||
+  copyFromWindow('navigator.globalPrivacyControl') === true ||
+  copyFromWindow('navigator.doNotTrack') === '1' ||
+  copyFromWindow('doNotTrack') === '1';
+
+/**
  * Parse a default-settings row into a setDefaultConsentState argument.
+ * With holdGrants, every granted type but security_storage is sent denied.
  */
 const parseCommandData = function(settings) {
   const regions = splitInput(settings.region);
@@ -142,7 +168,8 @@ const parseCommandData = function(settings) {
     commandData.region = regions;
   }
   for (let i = 0; i < granted.length; i++) {
-    commandData[granted[i]] = 'granted';
+    const held = holdGrants && granted[i] !== 'security_storage';
+    commandData[granted[i]] = held ? 'denied' : 'granted';
   }
   for (let i = 0; i < denied.length; i++) {
     commandData[denied[i]] = 'denied';
@@ -219,9 +246,16 @@ if (data.defaultSettings && data.defaultSettings.length > 0) {
 // 4. Register callback for consent updates from Kukie banner script
 //
 //    The Kukie banner calls window.__kukie_gtm_consent_callback(categories)
-//    every time consent changes (initial restore from cookie, user interaction,
-//    opt-out, notice-only accept). This lets the GTM template call
-//    updateConsentState() with the correct mapping.
+//    every time consent changes: the restore of a stored choice, the
+//    visitor's choice, a privacy signal, the notice's implied consent once
+//    it closes, and a page with no banner on screen. While a banner is on
+//    screen it sends no update before the visitor chooses: the region rows
+//    above already give Google the right start. This lets the GTM template
+//    call updateConsentState() with the correct mapping.
+//
+//    The callback MUST be registered before the banner script is injected:
+//    the banner looks for it when it starts, and finding it means this tag
+//    set the consent defaults, so the banner sends none of its own.
 //
 //    Note: The banner also calls gtag('consent', 'update', ...) directly,
 //    which flows through dataLayer. Both paths set the same values.
@@ -430,6 +464,88 @@ ___WEB_PERMISSIONS___
                   { "type": 8, "boolean": true },
                   { "type": 8, "boolean": false }
                 ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  { "type": 1, "string": "key" },
+                  { "type": 1, "string": "read" },
+                  { "type": 1, "string": "write" },
+                  { "type": 1, "string": "execute" }
+                ],
+                "mapValue": [
+                  { "type": 1, "string": "navigator.globalPrivacyControl" },
+                  { "type": 8, "boolean": true },
+                  { "type": 8, "boolean": false },
+                  { "type": 8, "boolean": false }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  { "type": 1, "string": "key" },
+                  { "type": 1, "string": "read" },
+                  { "type": 1, "string": "write" },
+                  { "type": 1, "string": "execute" }
+                ],
+                "mapValue": [
+                  { "type": 1, "string": "navigator.doNotTrack" },
+                  { "type": 8, "boolean": true },
+                  { "type": 8, "boolean": false },
+                  { "type": 8, "boolean": false }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  { "type": 1, "string": "key" },
+                  { "type": 1, "string": "read" },
+                  { "type": 1, "string": "write" },
+                  { "type": 1, "string": "execute" }
+                ],
+                "mapValue": [
+                  { "type": 1, "string": "doNotTrack" },
+                  { "type": 8, "boolean": true },
+                  { "type": 8, "boolean": false },
+                  { "type": 8, "boolean": false }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "get_cookies",
+        "vpiId": "get_cookies"
+      },
+      "param": [
+        {
+          "key": "cookieAccess",
+          "value": {
+            "type": 1,
+            "string": "specific"
+          }
+        },
+        {
+          "key": "cookieNames",
+          "value": {
+            "type": 2,
+            "listItem": [
+              {
+                "type": 1,
+                "string": "_cc_consent"
+              },
+              {
+                "type": 1,
+                "string": "kk_consent"
               }
             ]
           }
@@ -548,6 +664,94 @@ scenarios:
       wait_for_update: 500
     });
     assertApi('gtmOnSuccess').wasCalled();
+- name: The dashboard's rows give a granted region default for a first visit
+  code: |-
+    mock('injectScript', function(url, onSuccess, onFailure, cacheToken) {
+      onSuccess();
+    });
+    mock('getCookieValues', function(name) {
+      return [];
+    });
+    mock('copyFromWindow', function(key) {
+      return undefined;
+    });
+
+    runCode({
+      siteKey: '7d079d97-0306-4e8e-854b-4f64df021c04',
+      defaultSettings: [
+        {region: '', granted: 'security_storage', denied: 'ad_storage, ad_user_data, ad_personalization, analytics_storage, functionality_storage, personalization_storage'},
+        {region: 'US, CA', granted: 'ad_storage, ad_user_data, ad_personalization, analytics_storage, functionality_storage, personalization_storage, security_storage', denied: ''},
+        {region: 'US-CA', granted: 'security_storage', denied: 'ad_storage, ad_user_data, ad_personalization, analytics_storage, functionality_storage, personalization_storage'}
+      ]
+    });
+
+    assertApi('setDefaultConsentState').wasCalledWith({
+      region: ['US', 'CA'],
+      ad_storage: 'granted',
+      ad_user_data: 'granted',
+      ad_personalization: 'granted',
+      analytics_storage: 'granted',
+      functionality_storage: 'granted',
+      personalization_storage: 'granted',
+      security_storage: 'granted',
+      wait_for_update: 500
+    });
+    assertApi('setDefaultConsentState').wasCalledWith({
+      region: ['US-CA'],
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      functionality_storage: 'denied',
+      personalization_storage: 'denied',
+      security_storage: 'granted',
+      wait_for_update: 500
+    });
+- name: A choice stored on the device turns granted rows to denied
+  code: |-
+    mock('injectScript', function(url, onSuccess, onFailure, cacheToken) {
+      onSuccess();
+    });
+    mock('getCookieValues', function(name) {
+      return name === '_cc_consent' ? ['stored'] : [];
+    });
+
+    runCode({
+      siteKey: '7d079d97-0306-4e8e-854b-4f64df021c04',
+      defaultSettings: [
+        {region: 'US', granted: 'ad_storage, analytics_storage, security_storage', denied: ''}
+      ]
+    });
+
+    assertApi('setDefaultConsentState').wasCalledWith({
+      region: ['US'],
+      ad_storage: 'denied',
+      analytics_storage: 'denied',
+      security_storage: 'granted',
+      wait_for_update: 500
+    });
+- name: Global Privacy Control turns granted rows to denied
+  code: |-
+    mock('injectScript', function(url, onSuccess, onFailure, cacheToken) {
+      onSuccess();
+    });
+    mock('copyFromWindow', function(key) {
+      return key === 'navigator.globalPrivacyControl' ? true : undefined;
+    });
+
+    runCode({
+      siteKey: '7d079d97-0306-4e8e-854b-4f64df021c04',
+      defaultSettings: [
+        {region: 'US', granted: 'ad_storage, security_storage', denied: ''}
+      ]
+    });
+
+    assertApi('setDefaultConsentState').wasCalledWith({
+      region: ['US'],
+      ad_storage: 'denied',
+      security_storage: 'granted',
+      wait_for_update: 500
+    });
 
 
 ___NOTES___
@@ -556,3 +760,8 @@ Created on 30/03/2026
 12/10/2026: an empty Default Consent Settings table denies every type except
 security_storage, and the tag reports failure when the banner script does not
 load (for example when a Content-Security-Policy blocks cdn.kukie.io).
+12/10/2026: the Kukie dashboard generates the Default Consent Settings rows from
+the site's region rules. A visitor with a choice stored on the device
+(_cc_consent or kk_consent) or a Global Privacy Control or Do Not Track signal
+starts with every granted type denied but security_storage, until the banner
+restores the choice.
