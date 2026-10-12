@@ -51,6 +51,7 @@ ___TEMPLATE_PARAMETERS___
     "type": "PARAM_TABLE",
     "name": "defaultSettings",
     "displayName": "Default Consent Settings",
+    "help": "The consent state Google tags start with, before the visitor makes a choice. Add one row with the region left blank and all six types as denied: ad_storage, ad_user_data, ad_personalization, analytics_storage, functionality_storage, personalization_storage. If you add no rows, the tag denies these six and grants security_storage. The Kukie banner then sends the visitor's choice as an update.",
     "paramTableColumns": [
       {
         "param": {
@@ -190,13 +191,28 @@ if (data.url_passthrough) {
 
 // ---------------------------------------------------------------------------
 // 3. Default consent state (from template UI configuration)
+//
+//    With no rows, every type except security_storage starts denied. Before
+//    this, an empty table set no default at all, so Google tags that fired
+//    before the banner script loaded ran as if consent were granted.
 // ---------------------------------------------------------------------------
-if (data.defaultSettings) {
+if (data.defaultSettings && data.defaultSettings.length > 0) {
   for (let i = 0; i < data.defaultSettings.length; i++) {
     const commandData = parseCommandData(data.defaultSettings[i]);
     commandData.wait_for_update = 500;
     setDefaultConsentState(commandData);
   }
+} else {
+  setDefaultConsentState({
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'denied',
+    functionality_storage: 'denied',
+    personalization_storage: 'denied',
+    security_storage: 'granted',
+    wait_for_update: 500
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +232,12 @@ setInWindow('__kukie_gtm_consent_callback', function(categories) {
 
 // ---------------------------------------------------------------------------
 // 5. Inject Kukie banner script
+//
+//    The tag reports success only once the banner script has loaded. When
+//    the browser refuses it (most often a Content-Security-Policy without
+//    https://cdn.kukie.io in script-src), Tag Assistant shows the tag as
+//    failed instead of fired. The consent defaults above are already set
+//    either way.
 // ---------------------------------------------------------------------------
 const siteKey = makeString(data.siteKey || '');
 
@@ -225,12 +247,15 @@ if (siteKey) {
 
   injectScript(scriptUrl, function() {
     log('Kukie CMP: Script loaded');
+    data.gtmOnSuccess();
   }, function() {
-    log('Kukie CMP: Failed to load script');
+    log('Kukie CMP: Failed to load ' + scriptUrl + '. If your site sends a Content-Security-Policy, add https://cdn.kukie.io to script-src. See https://kukie.io/docs/installation-guides/content-security-policy');
+    data.gtmOnFailure();
   }, 'kukieCmp');
+} else {
+  log('Kukie CMP: No site key, so the banner script was not loaded');
+  data.gtmOnFailure();
 }
-
-data.gtmOnSuccess();
 
 
 ___WEB_PERMISSIONS___
@@ -476,9 +501,58 @@ ___WEB_PERMISSIONS___
 
 ___TESTS___
 
-scenarios: []
+scenarios:
+- name: An empty default table denies every type except security_storage
+  code: |-
+    mock('injectScript', function(url, onSuccess, onFailure, cacheToken) {
+      onSuccess();
+    });
+
+    runCode({siteKey: '7d079d97-0306-4e8e-854b-4f64df021c04', url_passthrough: true});
+
+    assertApi('setDefaultConsentState').wasCalledWith({
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      functionality_storage: 'denied',
+      personalization_storage: 'denied',
+      security_storage: 'granted',
+      wait_for_update: 500
+    });
+    assertApi('gtmOnSuccess').wasCalled();
+- name: A banner script the browser refuses reports failure
+  code: |-
+    mock('injectScript', function(url, onSuccess, onFailure, cacheToken) {
+      onFailure();
+    });
+
+    runCode({siteKey: '7d079d97-0306-4e8e-854b-4f64df021c04'});
+
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('gtmOnSuccess').wasNotCalled();
+- name: Table rows replace the built-in default
+  code: |-
+    mock('injectScript', function(url, onSuccess, onFailure, cacheToken) {
+      onSuccess();
+    });
+
+    runCode({
+      siteKey: '7d079d97-0306-4e8e-854b-4f64df021c04',
+      defaultSettings: [{region: '', granted: '', denied: 'ad_storage, analytics_storage'}]
+    });
+
+    assertApi('setDefaultConsentState').wasCalledWith({
+      ad_storage: 'denied',
+      analytics_storage: 'denied',
+      wait_for_update: 500
+    });
+    assertApi('gtmOnSuccess').wasCalled();
 
 
 ___NOTES___
 
 Created on 30/03/2026
+12/10/2026: an empty Default Consent Settings table denies every type except
+security_storage, and the tag reports failure when the banner script does not
+load (for example when a Content-Security-Policy blocks cdn.kukie.io).
