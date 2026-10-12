@@ -1,6 +1,8 @@
 homepage: "https://kukie.io"
 documentation: "https://kukie.io/docs/installation-guides/install-kukie-via-google-tag-manager"
 versions:
+  - sha: dbcd627f3820421a6fa821e6cfc7212a64df29ee
+    changeNotes: "Copy the Default Consent Settings rows from your Kukie dashboard: they follow your region rules. A visitor who already made a choice on the device, or whose browser sends Global Privacy Control or Do Not Track, now starts with every granted type denied except security_storage until the Kukie banner restores the choice."
   - sha: 6184c25d90a4f16c85094f1ef45ff982b7c2b33b
     changeNotes: "An empty Default Consent Settings table now denies every consent type except security_storage until the banner sends the visitor's choice. The tag reports failure when the Kukie banner script does not load, for example when a Content-Security-Policy blocks cdn.kukie.io."
   - sha: 5c58b6237999ba92ed11e6e8f2ced93a29ee762e
